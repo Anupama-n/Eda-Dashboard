@@ -1,6 +1,12 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
-import type { ChartConfig } from '../types';
+
+interface ChartConfig {
+  type: 'histogram' | 'scatter' | 'bar' | 'pie' | 'line' | 'boxplot' | 'heatmap';
+  xColumn?: string;
+  yColumn?: string;
+  colorColumn?: string;
+}
 
 interface VisualizationEngineProps {
   data: any[];
@@ -18,33 +24,46 @@ export const VisualizationEngine: React.FC<VisualizationEngineProps> = ({
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
-    if (!svgRef.current) return;
+    // Debug logging
+    console.log('VisualizationEngine render:', {
+      dataLength: data?.length,
+      config,
+      dimensions: { width, height },
+      sampleData: data?.[0],
+      availableColumns: data?.[0] ? Object.keys(data[0]) : []
+    });
+
+    if (!svgRef.current) {
+      console.warn('SVG ref not available');
+      return;
+    }
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove(); // Clear previous chart
 
-    // Add loading/error states
+    // Validation checks with better error messages
     if (!data || data.length === 0) {
-      svg.append('text')
-        .attr('x', width / 2)
-        .attr('y', height / 2)
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .style('font-size', '16px')
-        .style('fill', '#666')
-        .text('No data available');
+      console.warn('No data provided to visualization');
+      renderErrorMessage(svg, 'No data available', width, height);
       return;
     }
 
     if (!config || !config.type) {
-      svg.append('text')
-        .attr('x', width / 2)
-        .attr('y', height / 2)
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .style('font-size', '16px')
-        .style('fill', '#666')
-        .text('No chart configuration');
+      console.warn('No chart configuration provided');
+      renderErrorMessage(svg, 'No chart configuration', width, height);
+      return;
+    }
+
+    // Check if columns exist in data
+    if (config.xColumn && !data[0].hasOwnProperty(config.xColumn)) {
+      console.error(`X column '${config.xColumn}' not found in data. Available columns:`, Object.keys(data[0]));
+      renderErrorMessage(svg, `Column '${config.xColumn}' not found`, width, height);
+      return;
+    }
+
+    if (config.yColumn && !data[0].hasOwnProperty(config.yColumn)) {
+      console.error(`Y column '${config.yColumn}' not found in data. Available columns:`, Object.keys(data[0]));
+      renderErrorMessage(svg, `Column '${config.yColumn}' not found`, width, height);
       return;
     }
 
@@ -54,14 +73,8 @@ export const VisualizationEngine: React.FC<VisualizationEngineProps> = ({
 
     // Ensure positive dimensions
     if (innerWidth <= 0 || innerHeight <= 0) {
-      svg.append('text')
-        .attr('x', width / 2)
-        .attr('y', height / 2)
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .style('font-size', '16px')
-        .style('fill', '#666')
-        .text('Chart area too small');
+      console.warn('Chart area too small:', { innerWidth, innerHeight });
+      renderErrorMessage(svg, 'Chart area too small', width, height);
       return;
     }
 
@@ -70,6 +83,8 @@ export const VisualizationEngine: React.FC<VisualizationEngineProps> = ({
       .attr('transform', `translate(${margin.left},${margin.top})`);
 
     try {
+      console.log(`Rendering ${config.type} chart`);
+      
       switch (config.type) {
         case 'histogram':
           renderHistogram(g, data, config, innerWidth, innerHeight);
@@ -93,27 +108,17 @@ export const VisualizationEngine: React.FC<VisualizationEngineProps> = ({
           renderHeatmap(g, data, config, innerWidth, innerHeight);
           break;
         default:
-          g.append('text')
-            .attr('x', innerWidth / 2)
-            .attr('y', innerHeight / 2)
-            .attr('text-anchor', 'middle')
-            .attr('dominant-baseline', 'middle')
-            .style('font-size', '16px')
-            .style('fill', '#666')
-            .text(`Unsupported chart type: ${config.type}`);
+          console.error(`Unsupported chart type: ${config.type}`);
+          renderErrorMessage(g, `Unsupported chart type: ${config.type}`, innerWidth, innerHeight);
           break;
       }
+      
+      console.log(`Successfully rendered ${config.type} chart`);
+      
     } catch (error) {
       console.error('Error rendering chart:', error);
       g.selectAll('*').remove();
-      g.append('text')
-        .attr('x', innerWidth / 2)
-        .attr('y', innerHeight / 2)
-        .attr('text-anchor', 'middle')
-        .attr('dominant-baseline', 'middle')
-        .style('font-size', '16px')
-        .style('fill', '#dc2626')
-        .text('Error rendering chart');
+      renderErrorMessage(g, 'Error rendering chart', innerWidth, innerHeight);
     }
   }, [data, config, width, height]);
 
@@ -129,6 +134,19 @@ export const VisualizationEngine: React.FC<VisualizationEngineProps> = ({
     </div>
   );
 };
+
+// Helper function for consistent error message rendering
+function renderErrorMessage(container: any, message: string, width: number, height: number) {
+  container.append('text')
+    .attr('x', width / 2)
+    .attr('y', height / 2)
+    .attr('text-anchor', 'middle')
+    .attr('dominant-baseline', 'middle')
+    .style('font-size', '16px')
+    .style('fill', '#dc2626')
+    .style('font-weight', 'bold')
+    .text(message);
+}
 
 // Helper function to calculate Pearson correlation coefficient
 function pearsonCorrelation(x: number[], y: number[]): number {
@@ -149,6 +167,8 @@ function pearsonCorrelation(x: number[], y: number[]): number {
 
 // Histogram
 function renderHistogram(g: any, data: any[], config: ChartConfig, width: number, height: number) {
+  console.log('Rendering histogram with config:', config);
+  
   if (!config.xColumn) {
     g.append('text')
       .attr('x', width / 2)
@@ -163,6 +183,8 @@ function renderHistogram(g: any, data: any[], config: ChartConfig, width: number
   const values = data
     .map(d => d && d[config.xColumn!] !== null ? +d[config.xColumn!] : NaN)
     .filter(d => !isNaN(d));
+  
+  console.log('Histogram values:', values.slice(0, 5), `(${values.length} total)`);
   
   if (values.length === 0) {
     g.append('text')
@@ -227,6 +249,8 @@ function renderHistogram(g: any, data: any[], config: ChartConfig, width: number
 
 // Scatter Plot
 function renderScatterPlot(g: any, data: any[], config: ChartConfig, width: number, height: number) {
+  console.log('Rendering scatter plot with config:', config);
+  
   if (!config.xColumn || !config.yColumn) {
     g.append('text')
       .attr('x', width / 2)
@@ -245,6 +269,8 @@ function renderScatterPlot(g: any, data: any[], config: ChartConfig, width: numb
     !isNaN(+d[config.xColumn!]) && 
     !isNaN(+d[config.yColumn!])
   );
+
+  console.log('Scatter plot valid data points:', validData.length);
 
   if (validData.length === 0) {
     g.append('text')
@@ -284,7 +310,21 @@ function renderScatterPlot(g: any, data: any[], config: ChartConfig, width: numb
     .attr('fill', (d: any) => 
       colorScale ? colorScale(d[config.colorColumn!]) : '#3b82f6'
     )
-    .attr('opacity', 0.7);
+    .attr('opacity', 0.7)
+    .on('mouseover', function(_event: any, d: { [x: string]: any; }) {
+      // Simple tooltip
+      const tooltip = g.append('text')
+        .attr('class', 'tooltip')
+        .attr('x', x(+d[config.xColumn!]) + 10)
+        .attr('y', y(+d[config.yColumn!]) - 10)
+        .style('font-size', '12px')
+        .style('fill', '#333')
+        .style('background', 'white')
+        .text(`(${d[config.xColumn!]}, ${d[config.yColumn!]})`);
+    })
+    .on('mouseout', function() {
+      g.selectAll('.tooltip').remove();
+    });
 
   // Axes
   g.append('g')
@@ -312,6 +352,8 @@ function renderScatterPlot(g: any, data: any[], config: ChartConfig, width: numb
 
 // Bar Chart
 function renderBarChart(g: any, data: any[], config: ChartConfig, width: number, height: number) {
+  console.log('Rendering bar chart with config:', config);
+  
   if (!config.xColumn || !config.yColumn) {
     g.append('text')
       .attr('x', width / 2)
@@ -330,6 +372,8 @@ function renderBarChart(g: any, data: any[], config: ChartConfig, width: number,
     d[config.yColumn!] !== null &&
     !isNaN(+d[config.yColumn!])
   );
+
+  console.log('Bar chart valid data points:', validData.length);
 
   if (validData.length === 0) {
     g.append('text')
@@ -409,6 +453,8 @@ function renderBarChart(g: any, data: any[], config: ChartConfig, width: number,
 
 // Pie Chart
 function renderPieChart(g: any, data: any[], config: ChartConfig, width: number, height: number) {
+  console.log('Rendering pie chart with config:', config);
+  
   if (!config.xColumn) {
     g.append('text')
       .attr('x', width / 2)
@@ -421,6 +467,8 @@ function renderPieChart(g: any, data: any[], config: ChartConfig, width: number,
   }
 
   const validData = data.filter(d => d && d[config.xColumn!] !== null);
+
+  console.log('Pie chart valid data points:', validData.length);
 
   if (validData.length === 0) {
     g.append('text')
@@ -445,7 +493,9 @@ function renderPieChart(g: any, data: any[], config: ChartConfig, width: number,
   const pie = d3.pie<any>().value(d => d.value);
   const arc = d3.arc().innerRadius(0).outerRadius(radius - 10);
 
-  const color = d3.scaleOrdinal(d3.schemeCategory10);
+  const color = d3.scaleOrdinal()
+  .domain(chartData.map(d => d.key))
+  .range(['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40']);
 
   const pieData = pie(chartData);
 
@@ -472,6 +522,8 @@ function renderPieChart(g: any, data: any[], config: ChartConfig, width: number,
 
 // Line Chart
 function renderLineChart(g: any, data: any[], config: ChartConfig, width: number, height: number) {
+  console.log('Rendering line chart with config:', config);
+  
   if (!config.xColumn || !config.yColumn) {
     g.append('text')
       .attr('x', width / 2)
@@ -490,6 +542,8 @@ function renderLineChart(g: any, data: any[], config: ChartConfig, width: number
     !isNaN(+d[config.xColumn!]) && 
     !isNaN(+d[config.yColumn!])
   ).sort((a, b) => +a[config.xColumn!] - +b[config.xColumn!]);
+
+  console.log('Line chart valid data points:', validData.length);
 
   if (validData.length === 0) {
     g.append('text')
@@ -561,6 +615,8 @@ function renderLineChart(g: any, data: any[], config: ChartConfig, width: number
 
 // Box Plot
 function renderBoxPlot(g: any, data: any[], config: ChartConfig, width: number, height: number) {
+  console.log('Rendering box plot with config:', config);
+  
   if (!config.xColumn) {
     g.append('text')
       .attr('x', width / 2)
@@ -576,6 +632,8 @@ function renderBoxPlot(g: any, data: any[], config: ChartConfig, width: number, 
     .map(d => d && d[config.xColumn!] !== null ? +d[config.xColumn!] : NaN)
     .filter(d => !isNaN(d))
     .sort(d3.ascending);
+  
+  console.log('Box plot values:', values.slice(0, 5), `(${values.length} total)`);
   
   if (values.length === 0) {
     g.append('text')
@@ -664,6 +722,8 @@ function renderBoxPlot(g: any, data: any[], config: ChartConfig, width: number, 
 
 // Heatmap (correlation matrix)
 function renderHeatmap(g: any, data: any[], config: ChartConfig, width: number, height: number) {
+  console.log('Rendering heatmap with config:', config);
+  
   if (!data || data.length === 0) {
     g.append('text')
       .attr('x', width / 2)
@@ -680,6 +740,8 @@ function renderHeatmap(g: any, data: any[], config: ChartConfig, width: number, 
   const numericColumns = Object.keys(sampleRow).filter(key => 
     data.every(d => d && d[key] !== null && !isNaN(+d[key]))
   );
+
+  console.log('Heatmap numeric columns:', numericColumns);
 
   if (numericColumns.length < 2) {
     g.append('text')
