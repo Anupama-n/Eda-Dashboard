@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef } from 'react';
 import * as d3 from 'd3';
 
 interface ChartConfig {
@@ -15,13 +15,20 @@ interface VisualizationEngineProps {
   height: number;
 }
 
-export const VisualizationEngine: React.FC<VisualizationEngineProps> = ({
+// FIXED: Added a trailing comma inside the generic type parameters to fix TSX parsing error.
+export const VisualizationEngine = forwardRef<SVGSVGElement, VisualizationEngineProps,>(({
   data,
   config,
   width,
   height
-}) => {
-  const svgRef = useRef<SVGSVGElement>(null);
+}, ref) => {
+  // Use the forwarded ref, or create a local one if none is provided.
+  const localRef = useRef<SVGSVGElement>(null);
+  const svgRef = ref || localRef;
+
+  // State to manage the expanded/modal view
+  const [isExpanded, setIsExpanded] = useState(false);
+  const expandedSvgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
     // Debug logging
@@ -41,39 +48,28 @@ export const VisualizationEngine: React.FC<VisualizationEngineProps> = ({
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove(); // Clear previous chart
 
-    // Validation checks with better error messages
     if (!data || data.length === 0) {
-      console.warn('No data provided to visualization');
       renderErrorMessage(svg, 'No data available', width, height);
       return;
     }
-
     if (!config || !config.type) {
-      console.warn('No chart configuration provided');
       renderErrorMessage(svg, 'No chart configuration', width, height);
       return;
     }
-
-    // Check if columns exist in data
     if (config.xColumn && !data[0].hasOwnProperty(config.xColumn)) {
-      console.error(`X column '${config.xColumn}' not found in data. Available columns:`, Object.keys(data[0]));
       renderErrorMessage(svg, `Column '${config.xColumn}' not found`, width, height);
       return;
     }
-
     if (config.yColumn && !data[0].hasOwnProperty(config.yColumn)) {
-      console.error(`Y column '${config.yColumn}' not found in data. Available columns:`, Object.keys(data[0]));
       renderErrorMessage(svg, `Column '${config.yColumn}' not found`, width, height);
       return;
     }
 
-    const margin = { top: 20, right: 30, bottom: 40, left: 50 };
+    const margin = { top: 40, right: 40, bottom: 50, left: 60 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
-    // Ensure positive dimensions
     if (innerWidth <= 0 || innerHeight <= 0) {
-      console.warn('Chart area too small:', { innerWidth, innerHeight });
       renderErrorMessage(svg, 'Chart area too small', width, height);
       return;
     }
@@ -108,7 +104,6 @@ export const VisualizationEngine: React.FC<VisualizationEngineProps> = ({
           renderHeatmap(g, data, config, innerWidth, innerHeight);
           break;
         default:
-          console.error(`Unsupported chart type: ${config.type}`);
           renderErrorMessage(g, `Unsupported chart type: ${config.type}`, innerWidth, innerHeight);
           break;
       }
@@ -120,20 +115,144 @@ export const VisualizationEngine: React.FC<VisualizationEngineProps> = ({
       g.selectAll('*').remove();
       renderErrorMessage(g, 'Error rendering chart', innerWidth, innerHeight);
     }
-  }, [data, config, width, height]);
+  }, [data, config, width, height, svgRef]);
+
+
+  // Function to handle downloading the SVG
+  const handleDownloadSVG = () => {
+    const svgEl = expandedSvgRef.current;
+    if (!svgEl) {
+      console.error("Expanded SVG reference not found for download.");
+      return;
+    }
+    
+    // Serialize the SVG
+    const serializer = new XMLSerializer();
+    let source = serializer.serializeToString(svgEl);
+
+    // Add XML declaration
+    if(!source.match(/^<svg[^>]+xmlns="http\:\/\/www\.w3\.org\/2000\/svg"/)){
+        source = source.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+    if(!source.match(/^<svg[^>]+"http\:\/\/www\.w3\.org\/1999\/xlink"/)){
+        source = source.replace(/^<svg/, '<svg xmlns:xlink="http://www.w3.org/1999/xlink"');
+    }
+    
+    // Create a Blob
+    const blob = new Blob([source], {type: "image/svg+xml;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    
+    // Create a link and trigger the download
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${config.type}_chart.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   return (
-    <div className="w-full overflow-hidden">
-      <svg
-        ref={svgRef}
-        width={width}
-        height={height}
-        className="w-full h-auto border border-gray-200 rounded"
-        style={{ maxWidth: '100%' }}
-      />
-    </div>
+    <>
+      {/* Added onClick to expand and cursor style */}
+      <div 
+        className="w-full overflow-hidden cursor-pointer"
+        onClick={() => setIsExpanded(true)}
+      >
+        <svg
+          ref={svgRef}
+          width={width}
+          height={height}
+          className="w-full h-auto border border-gray-200 rounded"
+          style={{ maxWidth: '100%' }}
+        />
+      </div>
+
+      {/* Modal for expanded view */}
+      {isExpanded && (
+        <div style={modalStyles.overlay}>
+          <div style={modalStyles.content}>
+            <div style={modalStyles.header}>
+              <button onClick={handleDownloadSVG} style={modalStyles.button}>
+                Download SVG
+              </button>
+              <button onClick={() => setIsExpanded(false)} style={modalStyles.closeButton}>
+                ×
+              </button>
+            </div>
+            <div style={modalStyles.chartContainer}>
+              {/* Render the chart again, but larger and with a ref for downloading */}
+              <VisualizationEngine
+                ref={expandedSvgRef}
+                data={data}
+                config={config}
+                width={window.innerWidth * 0.85}
+                height={window.innerHeight * 0.8}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
+});
+
+// Styles for the modal
+const modalStyles: { [key: string]: React.CSSProperties } = {
+  overlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    zIndex: 1000,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  content: {
+    backgroundColor: '#1e1e1e', // Dark background to match VS Code theme
+    padding: '20px',
+    borderRadius: '8px',
+    width: '90vw',
+    height: '90vh',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  header: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginBottom: '10px',
+  },
+  button: {
+    backgroundColor: '#3b82f6',
+    color: 'white',
+    border: 'none',
+    padding: '8px 16px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    marginRight: 'auto'
+  },
+  closeButton: {
+    background: 'transparent',
+    border: 'none',
+    fontSize: '2rem',
+    color: '#ccc',
+    cursor: 'pointer',
+    lineHeight: 1,
+  },
+  chartContainer: {
+    flex: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff', // White background for the chart itself
+    borderRadius: '4px',
+  },
 };
+
 
 // Helper function for consistent error message rendering
 function renderErrorMessage(container: any, message: string, width: number, height: number) {
@@ -148,6 +267,8 @@ function renderErrorMessage(container: any, message: string, width: number, heig
     .text(message);
 }
 
+// ... (all your render... functions like renderHistogram, renderScatterPlot, etc., remain here unchanged)
+// [The rest of your existing code for renderHistogram, renderScatterPlot, etc. goes here]
 // Helper function to calculate Pearson correlation coefficient
 function pearsonCorrelation(x: number[], y: number[]): number {
   const n = x.length;
@@ -721,21 +842,15 @@ function renderBoxPlot(g: any, data: any[], config: ChartConfig, width: number, 
 }
 
 // Heatmap (correlation matrix)
+// Heatmap (correlation matrix)
 function renderHeatmap(g: any, data: any[], config: ChartConfig, width: number, height: number) {
   console.log('Rendering heatmap with config:', config);
   
   if (!data || data.length === 0) {
-    g.append('text')
-      .attr('x', width / 2)
-      .attr('y', height / 2)
-      .attr('text-anchor', 'middle')
-      .style('font-size', '14px')
-      .style('fill', '#666')
-      .text('No data available');
+    renderErrorMessage(g, 'No data available', width, height);
     return;
   }
 
-  // Get numeric columns
   const sampleRow = data[0];
   const numericColumns = Object.keys(sampleRow).filter(key => 
     data.every(d => d && d[key] !== null && !isNaN(+d[key]))
@@ -744,73 +859,78 @@ function renderHeatmap(g: any, data: any[], config: ChartConfig, width: number, 
   console.log('Heatmap numeric columns:', numericColumns);
 
   if (numericColumns.length < 2) {
-    g.append('text')
-      .attr('x', width / 2)
-      .attr('y', height / 2)
-      .attr('text-anchor', 'middle')
-      .style('font-size', '14px')
-      .style('fill', '#666')
-      .text('Need at least 2 numeric columns for correlation matrix');
+    renderErrorMessage(g, 'Need at least 2 numeric columns', width, height);
     return;
   }
+  
+  // FIXED: Explicitly define padding for labels to prevent clipping.
+  const labelPadding = 100; // Generous space for long/rotated labels
 
-  // Calculate correlations
+  // FIXED: Adjust grid size to account for the new padding.
+  const gridSize = Math.min(width - labelPadding, height - labelPadding);
+  const cellSize = Math.max(10, gridSize / numericColumns.length); // Ensure cells are not too small
+  
   const correlations: number[][] = [];
   numericColumns.forEach((col1, i) => {
     correlations[i] = [];
     numericColumns.forEach((col2, j) => {
+      if (i === j) {
+        correlations[i][j] = 1;
+        return;
+      }
       const values1 = data.map(d => +d[col1]);
       const values2 = data.map(d => +d[col2]);
       correlations[i][j] = pearsonCorrelation(values1, values2);
     });
   });
 
-  const cellSize = Math.min(width / numericColumns.length, height / numericColumns.length);
   const colorScale = d3.scaleSequential(d3.interpolateRdYlBu).domain([1, -1]);
 
   // Cells
   numericColumns.forEach((col1, i) => {
     numericColumns.forEach((col2, j) => {
+      // FIXED: Add labelPadding to x and y attributes to offset the grid.
       g.append('rect')
-        .attr('x', j * cellSize)
-        .attr('y', i * cellSize)
+        .attr('x', labelPadding + j * cellSize)
+        .attr('y', labelPadding + i * cellSize)
         .attr('width', cellSize)
         .attr('height', cellSize)
         .attr('fill', colorScale(correlations[i][j]))
-        .attr('stroke', 'white')
-        .attr('stroke-width', 1);
+        .attr('stroke', '#333')
+        .attr('stroke-width', 0.5);
 
       // Correlation value text
       g.append('text')
-        .attr('x', j * cellSize + cellSize / 2)
-        .attr('y', i * cellSize + cellSize / 2)
+        .attr('x', labelPadding + j * cellSize + cellSize / 2)
+        .attr('y', labelPadding + i * cellSize + cellSize / 2)
         .attr('dy', '0.35em')
         .style('text-anchor', 'middle')
-        .style('font-size', '10px')
-        .style('fill', Math.abs(correlations[i][j]) > 0.5 ? 'white' : 'black')
+        .style('font-size', Math.min(12, cellSize / 3) + 'px')
+        .style('fill', Math.abs(correlations[i][j]) > 0.6 ? 'white' : 'black')
         .text(correlations[i][j].toFixed(2));
     });
   });
 
-  // Column labels (top)
+  // Column labels (top, X-axis)
   numericColumns.forEach((col, i) => {
+    const xPos = labelPadding + i * cellSize + cellSize / 2;
+    const yPos = labelPadding - 10;
     g.append('text')
-      .attr('x', i * cellSize + cellSize / 2)
-      .attr('y', -5)
-      .style('text-anchor', 'middle')
-      .style('font-size', '10px')
+      .attr('transform', `translate(${xPos}, ${yPos}) rotate(-45)`)
+      .style('text-anchor', 'start')
+      .style('font-size', Math.min(12, cellSize / 2.5) + 'px')
       .style('font-weight', 'bold')
       .text(col);
   });
 
-  // Row labels (left)
+  // Row labels (left, Y-axis) - THIS IS THE PART THAT WASN'T SHOWING
   numericColumns.forEach((col, i) => {
     g.append('text')
-      .attr('x', -5)
-      .attr('y', i * cellSize + cellSize / 2)
+      .attr('x', labelPadding - 10)
+      .attr('y', labelPadding + i * cellSize + cellSize / 2)
       .attr('dy', '0.35em')
       .style('text-anchor', 'end')
-      .style('font-size', '10px')
+      .style('font-size', Math.min(12, cellSize / 2.5) + 'px')
       .style('font-weight', 'bold')
       .text(col);
   });
